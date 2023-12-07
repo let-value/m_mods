@@ -1,0 +1,28 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CurseForge: ${{ secrets.CURSEFORGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 8
+      - name: Download mods
+        run: dotnet run --project src/m_mods.csproj -- examples/optifine-1.zip out
+      - name: Archive mods
+        run: zip mods.zip ./out -r
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: "mods.zip,examples/optifine-1.zip"
+          bodyFile: "out/README.md"
