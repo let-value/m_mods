@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 
 namespace CurseForge;
@@ -28,3 +29,39 @@ public record Manifest(
     [property: JsonPropertyName("files")] IReadOnlyList<ModFile> Files,
     [property: JsonPropertyName("overrides")] string Overrides
 );
+
+public record StringResponse(
+    [property: JsonPropertyName("data")] string Data
+);
+
+public class CurseForgeClient
+{
+    const string BaseUrl = "https://api.curseforge.com";
+    HttpClient HttpClient;
+
+    public CurseForgeClient(string? apiToken)
+    {
+        HttpClient = new HttpClient
+        {
+            BaseAddress = new Uri(BaseUrl),
+            DefaultRequestHeaders =
+            {
+                { "x-api-key", apiToken },
+                { "Accept", "application/json" }
+            }
+        };
+    }
+
+    public async Task<Uri> GetDownloadUri(ModFile file)
+    {
+        var response = await HttpClient.GetFromJsonAsync<StringResponse>($"/v1/mods/{file.ProjectID}/files/{file.FileID}/download-url")
+            ?? throw new Exception("Failed to get download url");
+
+        var parsed = Uri.TryCreate(response.Data, UriKind.Absolute, out var uri);
+        if (!parsed || uri is null)
+        {
+            throw new Exception("Failed to parse download url");
+        }
+        return uri;
+    }
+}
