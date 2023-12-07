@@ -1,7 +1,9 @@
 ﻿using System.IO.Compression;
 using System.Text.Json;
+using ComposableAsync;
 using CurseForge;
 using Microsoft.Extensions.Configuration;
+using RateLimiter;
 
 string modpackPath = args[0];
 string outputPath = args[1];
@@ -43,8 +45,11 @@ Console.WriteLine($"Minecraft version: {manifest.Minecraft.Version}");
 var modLoaders = string.Join(", ", manifest.Minecraft.ModLoaders.Select(x => $"{(x.Primary ? "primary" : "")} {x.Id}"));
 Console.WriteLine($"Mod loaders: {modLoaders}");
 
-var curseForgeClient = new CurseForgeClient(apiToken);
-var httpClient = new HttpClient();
+var handler = TimeLimiter
+    .GetFromMaxCountByInterval(2, TimeSpan.FromSeconds(10))
+    .AsDelegatingHandler();
+var curseForgeClient = new CurseForgeClient(apiToken, handler);
+var httpClient = new HttpClient(handler);
 
 var modList = new List<string>();
 

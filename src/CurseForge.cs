@@ -39,9 +39,9 @@ public class CurseForgeClient
     const string BaseUrl = "https://api.curseforge.com";
     HttpClient HttpClient;
 
-    public CurseForgeClient(string? apiToken)
+    public CurseForgeClient(string? apiToken, DelegatingHandler handler)
     {
-        HttpClient = new HttpClient
+        HttpClient = new HttpClient(handler)
         {
             BaseAddress = new Uri(BaseUrl),
             DefaultRequestHeaders =

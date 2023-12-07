@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="*" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="*" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="*" />
+    <PackageReference Include="RateLimiter" Version="*" />
   </ItemGroup>
 
 </Project>
