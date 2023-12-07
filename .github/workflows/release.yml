@@ -19,10 +19,10 @@ jobs:
         with:
           dotnet-version: 8
       - name: Download mods
-        run: dotnet run --project src/m_mods.csproj -- examples/optifine-1.zip out
+        run: dotnet run --project src/m_mods.csproj -- ny.zip out
       - name: Archive mods
         run: zip mods.zip ./out -r
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "mods.zip,examples/optifine-1.zip"
+          artifacts: "ny.zip,mods.zip"
           bodyFile: "out/README.md"
