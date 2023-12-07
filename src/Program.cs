@@ -40,10 +40,13 @@ if (manifest is null || manifest.ManifestType != "minecraftModpack")
 
 Console.WriteLine($"Modpack: {manifest.Name}, Version:{manifest.Version}");
 Console.WriteLine($"Minecraft version: {manifest.Minecraft.Version}");
-Console.WriteLine($"Mod loaders: {string.Join(", ", manifest.Minecraft.ModLoaders.Select(x => $"{(x.Primary ? "primary" : "")} {x.Id}"))}");
+var modLoaders = string.Join(", ", manifest.Minecraft.ModLoaders.Select(x => $"{(x.Primary ? "primary" : "")} {x.Id}"));
+Console.WriteLine($"Mod loaders: {modLoaders}");
 
 var curseForgeClient = new CurseForgeClient(apiToken);
 var httpClient = new HttpClient();
+
+var modList = new List<string>();
 
 foreach (var file in manifest.Files.Take(1))
 {
@@ -55,6 +58,8 @@ foreach (var file in manifest.Files.Take(1))
         Console.WriteLine("Failed to get download url.");
         return;
     }
+
+    modList.Add(fileName);
 
     var filePath = Path.Combine(outputPath, "mods", fileName);
 
@@ -93,6 +98,11 @@ foreach (var entry in overrideEntries)
     var relativePath = entry.FullName.Replace($"{manifest.Overrides}/", "");
     var filePath = Path.Combine(outputPath, relativePath);
 
+    if (relativePath.StartsWith("mods/"))
+    {
+        modList.Add(Path.GetFileName(filePath));
+    }
+
     if (File.Exists(filePath))
     {
         Console.WriteLine($"File {relativePath} already exists.");
@@ -113,3 +123,19 @@ foreach (var entry in overrideEntries)
 
     entry.ExtractToFile(filePath);
 }
+
+var description = $@"
+# Modpack
+
+- Name: {manifest.Name},
+- Version: {manifest.Version}
+- Minecraft version: {manifest.Minecraft.Version}
+- Mod loaders: {modLoaders}
+
+## Mods ({modList.Count})
+
+{string.Join(Environment.NewLine, modList.Select(x => $"- {x}"))}
+";
+
+var readmePath = Path.Combine(outputPath, "README.md");
+await File.WriteAllTextAsync(readmePath, description);
