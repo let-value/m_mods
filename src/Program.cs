@@ -1,107 +1,181 @@
-﻿using System.IO.Compression;
+﻿using System.Collections.Concurrent;
+using System.IO.Compression;
 using System.Text.Json;
 using ComposableAsync;
 using CurseForge;
-using Microsoft.Extensions.Configuration;
 using RateLimiter;
+using Spectre.Console;
+using static mmods.CLI;
+using static mmods.Utils;
 
-string modpackPath = args[0];
-string outputPath = args[1];
-
-if (!File.Exists(modpackPath))
+AppDomain.CurrentDomain.UnhandledException += (_, args) =>
 {
-    Console.WriteLine("Modpack zip file not found.");
-    return;
-}
+    AnsiConsole.WriteException((Exception)args.ExceptionObject);
+    Environment.Exit(1);
+};
 
-if (!Directory.Exists(outputPath))
-{
-    Directory.CreateDirectory(outputPath);
-}
+var (modpackPath, outputPath) = ParseArgs(args);
 
-var config = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", true)
-    .AddEnvironmentVariables()
-    .AddUserSecrets<Program>()
-    .Build();
-
-var apiToken = config.GetSection("CurseForge").Value;
+EnsureDirectoryExists(outputPath);
 
 using var archive = ZipFile.OpenRead(modpackPath);
-
 var manifestEntry = archive.Entries.First(x => x.FullName == "manifest.json");
 using var manifestStream = manifestEntry.Open();
 var manifest = JsonSerializer.Deserialize<Manifest>(manifestStream);
 
 if (manifest is null || manifest.ManifestType != "minecraftModpack")
 {
-    Console.WriteLine("Not a curseforge modpack.");
-    return;
+    throw new Exception("Not a curseforge modpack.");
 }
 
-Console.WriteLine($"Modpack: {manifest.Name}, Version:{manifest.Version}");
-Console.WriteLine($"Minecraft version: {manifest.Minecraft.Version}");
-var modLoaders = string.Join(", ", manifest.Minecraft.ModLoaders.Select(x => $"{(x.Primary ? "primary" : "")} {x.Id}"));
-Console.WriteLine($"Mod loaders: {modLoaders}");
+var requiredFiles = manifest.Files.Where(x => x.Required).ToList();
+var overrideEntries = archive.Entries.Where(x => x.FullName.StartsWith(manifest.Overrides)).ToList();
+
+var modLoaders = PrintModpackInfo(manifest, requiredFiles.Count, overrideEntries.Count);
 
 var handler = TimeLimiter
-    .GetFromMaxCountByInterval(2, TimeSpan.FromSeconds(10))
+    .GetFromMaxCountByInterval(100, TimeSpan.FromSeconds(10))
     .AsDelegatingHandler();
-var curseForgeClient = new CurseForgeClient(apiToken, handler);
+var curseForgeClient = new CurseForgeClient(handler);
 var httpClient = new HttpClient(handler);
 
-var modList = new List<string>();
+var filesQueue = new ConcurrentQueue<(int, ModFileDescription)>(requiredFiles.Select(file => (3, file)));
 
-await Parallel.ForEachAsync(
-    manifest.Files,
-    new ParallelOptions { MaxDegreeOfParallelism = 4 },
-    async (file, cancellationToken) =>
+var mods = new ConcurrentBag<string>();
+
+async Task DownloadFile(Uri uri, string filePath, string fileName, ProgressTask task, CancellationToken cancellationToken)
+{
+    using var response = await httpClient!.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+    try
     {
-        var uri = await curseForgeClient.GetDownloadUri(file);
-        var fileName = Path.GetFileName(uri?.LocalPath);
-
-        if (fileName is null)
-        {
-            Console.WriteLine("Failed to get download url.");
-            return;
-        }
-
-        modList.Add(fileName);
-
-        var filePath = Path.Combine(outputPath, "mods", fileName);
-
-        if (File.Exists(filePath))
-        {
-            Console.WriteLine($"File {fileName} already exists.");
-            return;
-        }
-
-        var directoryPath = Path.GetDirectoryName(filePath);
-
-        if (directoryPath is null)
-        {
-            Console.WriteLine($"Failed to get directory path for {fileName}");
-            return;
-        }
-
-        if (!Directory.Exists(directoryPath))
-        {
-            Directory.CreateDirectory(directoryPath);
-        }
-
-        Console.WriteLine($"Downloading {fileName}...");
-
-        using var response = await httpClient.GetAsync(uri, cancellationToken);
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        await using var fileStream = File.Create(filePath);
-        await stream.CopyToAsync(fileStream, cancellationToken);
-
-        Console.WriteLine($"Downloaded {fileName}.");
+        response.EnsureSuccessStatusCode();
     }
+    catch (Exception exception)
+    {
+        throw new Exception($"Failed to download {fileName} from {uri}", exception);
+    }
+
+    var contentLength = response.Content.Headers.ContentLength ?? 0;
+    var bufferSize = 8192;
+
+    task.MaxValue(contentLength);
+    task.StartTask();
+
+    AnsiConsole.MarkupLine($"Starting download of [u]{Markup.Escape(fileName)}[/] from [u]{Markup.Escape(uri!.ToString())}[/] ({contentLength} bytes)");
+
+    await using var contentStream = await response.Content.ReadAsStreamAsync();
+    using var fileStream = new FileStream(filePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize, true);
+    var buffer = new byte[bufferSize];
+
+    while (true)
+    {
+        var read = await contentStream.ReadAsync(buffer, 0, buffer.Length);
+        if (read == 0)
+        {
+            AnsiConsole.MarkupLine($"Download of [u]{Markup.Escape(fileName)}[/] [green]completed![/]");
+            break;
+        }
+
+        task.Increment(read);
+
+        await fileStream.WriteAsync(buffer, 0, read);
+    }
+}
+
+async ValueTask TryDownloadMod(
+    (int, ModFileDescription) job,
+    ProgressContext context,
+    CancellationToken cancellationToken
+)
+{
+    var (tries, file) = job;
+
+    var taskName = $"ProjectID: {file.ProjectID}, FileID: {file.FileID}, Tries: {tries}";
+
+    var task = context.AddTask(
+        taskName,
+        new ProgressTaskSettings
+        {
+            AutoStart = false
+        }
+    );
+
+    try
+    {
+        var versions = await curseForgeClient.GetDownloadUris(file);
+
+        foreach (var uri in versions)
+        {
+            var fileName = Path.GetFileName(uri?.LocalPath);
+
+            if (fileName is null)
+            {
+                AnsiConsole.MarkupLine("Failed to get download url.");
+                continue;
+            }
+
+            task.Description = $"{taskName}, File: {Markup.Escape(fileName)}";
+
+            var filePath = Path.Combine(outputPath!, "mods", fileName);
+            if (File.Exists(filePath))
+            {
+                AnsiConsole.MarkupLine($"File {Markup.Escape(fileName)} already exists.");
+                mods!.Add(fileName);
+                return;
+            }
+
+            var directoryPath = Path.GetDirectoryName(filePath);
+            if (directoryPath is null)
+            {
+                throw new Exception($"Failed to get directory path for {Markup.Escape(fileName)}");
+            }
+
+            EnsureDirectoryExists(directoryPath);
+
+            await DownloadFile(uri!, filePath, fileName, task, cancellationToken);
+            mods!.Add(fileName);
+
+            break;
+        }
+    }
+    catch (Exception exception)
+    {
+        AnsiConsole.WriteException(exception);
+        if (tries > 0)
+        {
+            AnsiConsole.MarkupLine($"Failed to download {file.ProjectID} {file.FileID}, retrying...");
+            filesQueue.Enqueue((tries - 1, file));
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"Failed to download {file.ProjectID} {file.FileID}.");
+        }
+    }
+    finally
+    {
+        task.StopTask();
+    }
+}
+
+Task DownloadMods(ProgressContext context) => Parallel.ForEachAsync(
+    filesQueue,
+    new ParallelOptions { MaxDegreeOfParallelism = 4 },
+    (job, cancellationToken) => TryDownloadMod(job, context, cancellationToken)
 );
 
-var overrideEntries = archive.Entries.Where(x => x.FullName.StartsWith(manifest.Overrides)).ToList();
+await AnsiConsole.Progress()
+    .AutoClear(true)
+    .HideCompleted(true)
+    .Columns([
+        new TaskDescriptionColumn(),
+        new ProgressBarColumn(),
+        new PercentageColumn(),
+        new RemainingTimeColumn(),
+        new SpinnerColumn(),
+    ])
+    .StartAsync(DownloadMods);
+
 foreach (var entry in overrideEntries)
 {
     var relativePath = entry.FullName.Replace($"{manifest.Overrides}/", "");
@@ -109,19 +183,19 @@ foreach (var entry in overrideEntries)
 
     if (relativePath.StartsWith("mods/"))
     {
-        modList.Add(Path.GetFileName(filePath));
+        mods.Add(Path.GetFileName(filePath));
     }
 
     if (File.Exists(filePath))
     {
-        Console.WriteLine($"File {relativePath} already exists.");
+        AnsiConsole.MarkupLineInterpolated($"File {relativePath} already exists.");
         continue;
     }
 
     var directoryPath = Path.GetDirectoryName(filePath);
     if (directoryPath is null)
     {
-        Console.WriteLine($"Failed to get directory path for {relativePath}");
+        AnsiConsole.MarkupLineInterpolated($"Failed to get directory path for {Markup.Escape(relativePath)}");
         continue;
     }
 
@@ -133,6 +207,14 @@ foreach (var entry in overrideEntries)
     entry.ExtractToFile(filePath);
 }
 
+if (mods.Count < requiredFiles.Count)
+{
+    throw new Exception($"[red]Failed to download all required files.[/] Downloaded {mods.Count}/{requiredFiles.Count}");
+}
+
+var modList = mods.Select(x => $"- {x}").ToList();
+modList.Sort();
+
 var description = $@"
 # Modpack
 
@@ -141,9 +223,9 @@ var description = $@"
 - Minecraft version: {manifest.Minecraft.Version}
 - Mod loaders: {modLoaders}
 
-## Mods ({modList.Count})
+## Mods ({mods.Count})
 
-{string.Join(Environment.NewLine, modList.Select(x => $"- {x}"))}
+{string.Join(Environment.NewLine, modList)}
 ";
 
 var readmePath = Path.Combine(outputPath, "README.md");

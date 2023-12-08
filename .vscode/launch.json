@@ -11,7 +11,7 @@
       "preLaunchTask": "build",
       // If you have changed target frameworks, make sure to update the program path.
       "program": "${workspaceFolder}/src/bin/Debug/net8.0/m_mods.dll",
-      "args": ["examples/optifine-1.zip", "out"],
+      "args": ["ny.zip", "out"],
       "cwd": "${workspaceFolder}",
       // For more information about the 'console' field, see https://aka.ms/VSCode-CS-LaunchJson-Console
       "console": "internalConsole",
