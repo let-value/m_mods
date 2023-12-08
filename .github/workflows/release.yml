@@ -21,7 +21,7 @@ jobs:
       - name: Download mods
         run: dotnet run --project src/m_mods.csproj -- ny.zip out
       - name: Archive mods
-        run: zip mods.zip ./out -r
+        run: zip -9 -r mods.zip ./out
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "ny.zip,mods.zip"
