@@ -225,7 +225,13 @@ var description = $@"
 
 ## Mods ({mods.Count})
 
+<details>
+<summary>Show list</summary>
+
 {string.Join(Environment.NewLine, modList)}
+
+</details>
+
 ";
 
 var readmePath = Path.Combine(outputPath, "README.md");
