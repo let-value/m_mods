@@ -76,10 +76,35 @@ public class CurseForgeClient
     {
         var id = data.Id.ToString();
 
+        string[] idPrefixTransforms = [
+            id.Substring(0, 4)
+        ];
+
+        string[] idSuffixTransforms = [
+            id.Substring(4),
+            id.Substring(4).TrimStart('0')
+        ];
+
+        string[] baseFileNameTransforms = [
+            data.FileName,
+            data.FileName.Replace(' ', '+'),
+        ];
+
+        string[] fileNameTransforms = [
+            ..baseFileNameTransforms,
+            ..baseFileNameTransforms.Select(x => Uri.EscapeDataString(x))
+        ];
+
+        var mediafilez = idPrefixTransforms.SelectMany(idPrefixTransform =>
+            idSuffixTransforms.SelectMany(idSuffixTransform =>
+                fileNameTransforms.Select(fileNameTransform =>
+                    $"https://mediafilez.forgecdn.net/files/{idPrefixTransform}/{idSuffixTransform}/{fileNameTransform}"
+                )
+            )
+        );
+
         string[] variants = [
-            $"https://mediafilez.forgecdn.net/files/{id.Substring(0, 4)}/{id.Substring(4)}/{data.FileName.Replace(' ', '+')}",
-            $"https://mediafilez.forgecdn.net/files/{id.Substring(0, 4)}/{id.Substring(4)}/{data.FileName}",
-            $"https://mediafilez.forgecdn.net/files/{id.Substring(0, 4)}/{id.Substring(4)}/{Uri.EscapeDataString(data.FileName)}"
+            ..mediafilez
         ];
 
         return variants

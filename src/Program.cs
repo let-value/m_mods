@@ -105,39 +105,48 @@ async ValueTask TryDownloadMod(
     {
         var versions = await curseForgeClient.GetDownloadUris(file);
 
-        foreach (var uri in versions)
-        {
-            var fileName = Path.GetFileName(uri?.LocalPath);
-
-            if (fileName is null)
+        for (var i = 0; i < versions.Length; i++)
+            try
             {
-                AnsiConsole.MarkupLine("Failed to get download url.");
-                continue;
-            }
+                var uri = versions[i];
 
-            task.Description = $"{taskName}, File: {Markup.Escape(fileName)}";
+                var fileName = Path.GetFileName(uri?.LocalPath);
 
-            var filePath = Path.Combine(outputPath!, "mods", fileName);
-            if (File.Exists(filePath))
-            {
-                AnsiConsole.MarkupLine($"File {Markup.Escape(fileName)} already exists.");
+                if (fileName is null)
+                {
+                    AnsiConsole.MarkupLine("Failed to get download url.");
+                    continue;
+                }
+
+                task.Description = $"{taskName}, File: {Markup.Escape(fileName)}";
+
+                var filePath = Path.Combine(outputPath!, "mods", fileName);
+                if (File.Exists(filePath))
+                {
+                    AnsiConsole.MarkupLine($"File {Markup.Escape(fileName)} already exists.");
+                    mods!.Add(fileName);
+                    return;
+                }
+
+                var directoryPath = Path.GetDirectoryName(filePath);
+                if (directoryPath is null)
+                {
+                    throw new Exception($"Failed to get directory path for {Markup.Escape(fileName)}");
+                }
+
+                EnsureDirectoryExists(directoryPath);
+
+                await DownloadFile(uri!, filePath, fileName, task, cancellationToken);
                 mods!.Add(fileName);
-                return;
-            }
 
-            var directoryPath = Path.GetDirectoryName(filePath);
-            if (directoryPath is null)
+                break;
+            }
+            catch (Exception exception)
             {
-                throw new Exception($"Failed to get directory path for {Markup.Escape(fileName)}");
+                AnsiConsole.MarkupLine($"Failed to download url {i}/{versions.Length}, retrying...");
+                if (i == versions.Length - 1)
+                    throw new Exception($"Failed to download any urls.", exception);
             }
-
-            EnsureDirectoryExists(directoryPath);
-
-            await DownloadFile(uri!, filePath, fileName, task, cancellationToken);
-            mods!.Add(fileName);
-
-            break;
-        }
     }
     catch (Exception exception)
     {
