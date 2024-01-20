@@ -1,20 +1,50 @@
+using System.IO.Compression;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using mmods;
 using Spectre.Console;
 using static mmods.Configuration;
+using static mmods.Utils;
 
 namespace CurseForge;
+
+public static class CurseForgeModpack
+{
+    public static (Manifest, ZipArchive) ReadManifest(string modpackPath)
+    {
+        var archive = ZipFile.OpenRead(modpackPath);
+        var manifestEntry = archive.Entries.First(x => x.FullName == "manifest.json");
+        using var manifestStream = manifestEntry.Open();
+        var manifest = JsonSerializer.Deserialize<Manifest>(manifestStream);
+
+        if (manifest is null || manifest.ManifestType != "minecraftModpack")
+        {
+            throw new Exception("Not a curseforge modpack.");
+        }
+
+        return (manifest, archive);
+    }
+
+    public static (IReadOnlyList<ModFileDescription>, IReadOnlyList<ZipArchiveEntry>) GetManifestFiles(Manifest manifest, ZipArchive archive)
+    {
+        var requiredFiles = manifest.Files.Where(x => x.Required).ToList();
+        var overrideEntries = archive.Entries.Where(x => x.FullName.StartsWith(manifest.Overrides)).ToList();
+
+        return (requiredFiles, overrideEntries);
+    }
+}
 
 public class CurseForgeClient
 {
     const string BaseUrl = "https://api.curseforge.com";
     HttpClient HttpClient;
 
-    public CurseForgeClient(DelegatingHandler handler)
+    public CurseForgeClient()
     {
         var apiToken = GetCurseForgeToken();
 
-        HttpClient = new HttpClient(handler)
+        HttpClient = new HttpClient(Limiter)
         {
             BaseAddress = new Uri(BaseUrl),
             DefaultRequestHeaders =
@@ -25,13 +55,59 @@ public class CurseForgeClient
         };
     }
 
+    public async Task<Mod> GetMod(ModFileDescription file)
+    {
+        var response = await HttpClient.GetFromJsonAsync<ModResponse>($"/v1/mods/{file.ProjectID}")
+            ?? throw new Exception("Failed to get mod info.");
+
+        return response.Data;
+    }
+
+    public async Task<ModFile> GetModFile(ModFileDescription file)
+    {
+        var response = await HttpClient.GetFromJsonAsync<ModFileResponse>($"/v1/mods/{file.ProjectID}/files/{file.FileID}")
+            ?? throw new Exception("Failed to get mod file.");
+
+        return response.Data;
+    }
+
+    public async Task<string> GetModFileDownloadUrl(ModFileDescription file)
+    {
+        var response = await HttpClient.GetFromJsonAsync<StringResponse>($"/v1/mods/{file.ProjectID}/files/{file.FileID}/download-url")
+                ?? throw new Exception("Failed to get download url.");
+
+        return response.Data;
+    }
+
+    public async Task<FileType> GetFileType(ModFileDescription file)
+    {
+        try
+        {
+            var mod = await GetMod(file);
+
+            return mod.ClassId switch
+            {
+                12 or 4559 or 4546 => FileType.ResourcePack,
+                6552 => FileType.ShaderPack,
+                6 => FileType.Mod,
+                _ => throw new Exception($"I dont know what this is. ClassId: {mod.ClassId}")
+            };
+        }
+        catch (Exception exception)
+        {
+            AnsiConsole.WriteException(exception);
+            AnsiConsole.MarkupLineInterpolated($"[red]ProjectID: {file.ProjectID} FileID:{file.FileID}. Couldn't figure out what this is. Let's assume that this is a mod. [/]");
+
+            return FileType.Mod;
+        }
+    }
+
     public async Task<Uri[]> GetDownloadUris(ModFileDescription file)
     {
         try
         {
-            var downloadUrl = await HttpClient.GetFromJsonAsync<StringResponse>($"/v1/mods/{file.ProjectID}/files/{file.FileID}/download-url")
-                ?? throw new Exception("Failed to get download url.");
-            var parsed = Uri.TryCreate(downloadUrl.Data, UriKind.Absolute, out var uri);
+            var downloadUrl = await GetModFileDownloadUrl(file);
+            var parsed = Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri);
             if (!parsed || uri is null)
             {
                 throw new Exception("Failed to parse download url");
@@ -46,17 +122,16 @@ public class CurseForgeClient
 
         try
         {
-            var response = await HttpClient.GetFromJsonAsync<ModFileResponse>($"/v1/mods/{file.ProjectID}/files/{file.FileID}")
-                ?? throw new Exception("Failed to get mod file.");
-            var parsed = Uri.TryCreate(response.Data.DownloadUrl, UriKind.Absolute, out var uri);
+            var modFile = await GetModFile(file);
+            var parsed = Uri.TryCreate(modFile.DownloadUrl, UriKind.Absolute, out var uri);
             if (parsed && uri is not null)
             {
                 return [uri];
             }
 
-            AnsiConsole.MarkupLineInterpolated($"[red]ProjectID: {file.ProjectID} FileID:{file.FileID}. {Markup.Escape(response.Data.DisplayName)} has no download url. Trying to generate one.[/]");
+            AnsiConsole.MarkupLineInterpolated($"[red]ProjectID: {file.ProjectID} FileID:{file.FileID}. {Markup.Escape(modFile.DisplayName)} has no download url. Trying to generate one.[/]");
 
-            return TryGeneratingDownloadUri(response.Data);
+            return TryGeneratingDownloadUri(modFile);
         }
         catch (Exception exception)
         {
@@ -204,4 +279,103 @@ public record SortableGameVersion(
     [property: JsonPropertyName("gameVersion")] string GameVersion,
     [property: JsonPropertyName("gameVersionReleaseDate")] DateTime GameVersionReleaseDate,
     [property: JsonPropertyName("gameVersionTypeId")] long GameVersionTypeId
+);
+
+public record Author(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("url")] string Url
+);
+
+public record Category(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("gameId")] int GameId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("slug")] string Slug,
+    [property: JsonPropertyName("url")] string Url,
+    [property: JsonPropertyName("iconUrl")] string IconUrl,
+    [property: JsonPropertyName("dateModified")] DateTime DateModified,
+    [property: JsonPropertyName("isClass")] bool IsClass,
+    [property: JsonPropertyName("classId")] int ClassId,
+    [property: JsonPropertyName("parentCategoryId")] int ParentCategoryId
+);
+
+public record LatestFile(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("gameId")] int GameId,
+    [property: JsonPropertyName("modId")] int ModId,
+    [property: JsonPropertyName("isAvailable")] bool IsAvailable,
+    [property: JsonPropertyName("displayName")] string DisplayName,
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("releaseType")] int ReleaseType,
+    [property: JsonPropertyName("fileStatus")] int FileStatus,
+    [property: JsonPropertyName("hashes")] IReadOnlyList<Hash> Hashes,
+    [property: JsonPropertyName("fileDate")] DateTime FileDate,
+    [property: JsonPropertyName("fileLength")] int FileLength,
+    [property: JsonPropertyName("downloadCount")] int DownloadCount,
+    [property: JsonPropertyName("downloadUrl")] string DownloadUrl,
+    [property: JsonPropertyName("gameVersions")] IReadOnlyList<string> GameVersions,
+    [property: JsonPropertyName("sortableGameVersions")] IReadOnlyList<SortableGameVersion> SortableGameVersions,
+    [property: JsonPropertyName("dependencies")] IReadOnlyList<object> Dependencies,
+    [property: JsonPropertyName("alternateFileId")] int AlternateFileId,
+    [property: JsonPropertyName("isServerPack")] bool IsServerPack,
+    [property: JsonPropertyName("fileFingerprint")] long FileFingerprint,
+    [property: JsonPropertyName("modules")] IReadOnlyList<Module> Modules
+);
+
+public record LatestFilesIndex(
+    [property: JsonPropertyName("gameVersion")] string GameVersion,
+    [property: JsonPropertyName("fileId")] int FileId,
+    [property: JsonPropertyName("filename")] string Filename,
+    [property: JsonPropertyName("releaseType")] int ReleaseType,
+    [property: JsonPropertyName("gameVersionTypeId")] int GameVersionTypeId
+);
+
+public record Links(
+    [property: JsonPropertyName("websiteUrl")] string WebsiteUrl,
+    [property: JsonPropertyName("wikiUrl")] string WikiUrl,
+    [property: JsonPropertyName("issuesUrl")] object IssuesUrl,
+    [property: JsonPropertyName("sourceUrl")] object SourceUrl
+);
+
+public record Logo(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("modId")] int ModId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("thumbnailUrl")] string ThumbnailUrl,
+    [property: JsonPropertyName("url")] string Url
+);
+
+public record Mod(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("gameId")] int GameId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("slug")] string Slug,
+    [property: JsonPropertyName("links")] Links Links,
+    [property: JsonPropertyName("summary")] string Summary,
+    [property: JsonPropertyName("status")] int Status,
+    [property: JsonPropertyName("downloadCount")] int DownloadCount,
+    [property: JsonPropertyName("isFeatured")] bool IsFeatured,
+    [property: JsonPropertyName("primaryCategoryId")] int PrimaryCategoryId,
+    [property: JsonPropertyName("categories")] IReadOnlyList<Category> Categories,
+    [property: JsonPropertyName("classId")] int ClassId,
+    [property: JsonPropertyName("authors")] IReadOnlyList<Author> Authors,
+    [property: JsonPropertyName("logo")] Logo Logo,
+    [property: JsonPropertyName("screenshots")] IReadOnlyList<object> Screenshots,
+    [property: JsonPropertyName("mainFileId")] int MainFileId,
+    [property: JsonPropertyName("latestFiles")] IReadOnlyList<LatestFile> LatestFiles,
+    [property: JsonPropertyName("latestFilesIndexes")] IReadOnlyList<LatestFilesIndex> LatestFilesIndexes,
+    [property: JsonPropertyName("latestEarlyAccessFilesIndexes")] IReadOnlyList<object> LatestEarlyAccessFilesIndexes,
+    [property: JsonPropertyName("dateCreated")] DateTime DateCreated,
+    [property: JsonPropertyName("dateModified")] DateTime DateModified,
+    [property: JsonPropertyName("dateReleased")] DateTime DateReleased,
+    [property: JsonPropertyName("allowModDistribution")] bool AllowModDistribution,
+    [property: JsonPropertyName("gamePopularityRank")] int GamePopularityRank,
+    [property: JsonPropertyName("isAvailable")] bool IsAvailable,
+    [property: JsonPropertyName("thumbsUpCount")] int ThumbsUpCount
+);
+
+public record ModResponse(
+   [property: JsonPropertyName("data")] Mod Data
 );
