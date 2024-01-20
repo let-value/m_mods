@@ -87,12 +87,6 @@ foreach (var entry in overrideEntries)
                 });
     }
 
-    if (File.Exists(filePath))
-    {
-        AnsiConsole.MarkupLineInterpolated($"File {relativePath} already exists.");
-        continue;
-    }
-
     var directoryPath = Path.GetDirectoryName(filePath);
     if (directoryPath is null)
     {
@@ -105,7 +99,7 @@ foreach (var entry in overrideEntries)
         Directory.CreateDirectory(directoryPath);
     }
 
-    entry.ExtractToFile(filePath);
+    entry.ExtractToFile(filePath, true);
 }
 
 archive.Dispose();
