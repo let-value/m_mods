@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['Prominence+II+[FABRIC]-v2.5.6.zip', 'Prominence_II_RPG_Server_Pack_v2.5.6.zip']
+        file: ['Prominence+II+[FABRIC]-v2.5.6.zip']
     runs-on: ubuntu-latest
     permissions:
       contents: write
