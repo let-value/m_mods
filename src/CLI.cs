@@ -27,15 +27,15 @@ public static class CLI
         grid.AddColumn();
         grid.AddColumn();
 
-        grid.AddRow(["Name", manifest.Name]);
-        grid.AddRow(["Version", manifest.Version]);
-        grid.AddRow(["Minecraft", manifest.Minecraft.Version]);
+        grid.AddRow(["Name", Markup.Escape(manifest.Name)]);
+        grid.AddRow(["Version", Markup.Escape(manifest.Version)]);
+        grid.AddRow(["Minecraft", Markup.Escape(manifest.Minecraft.Version)]);
 
         var modLoaders = string.Join(", ", manifest.Minecraft.ModLoaders.Select(x => $"{(x.Primary ? ":check_mark:" : "")} {x.Id}"));
 
-        grid.AddRow(["Mod loaders", modLoaders]);
-        grid.AddRow(["Mods", requiredFilesCount.ToString()]);
-        grid.AddRow(["Overrides", overrideEntriesCount.ToString()]);
+        grid.AddRow(["Mod loaders", Markup.Escape(modLoaders)]);
+        grid.AddRow(["Mods", Markup.Escape(requiredFilesCount.ToString())]);
+        grid.AddRow(["Overrides", Markup.Escape(overrideEntriesCount.ToString())]);
 
         var panel = new Panel(grid)
         {

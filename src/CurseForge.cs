@@ -71,6 +71,7 @@ public class CurseForgeClient
         https://mediafilez.forgecdn.net/files/4765/566/evenmoreinstruments-1.20.2-2.1.jar
         https://mediafilez.forgecdn.net/files/4765/565/evenmoreinstruments-1.20+1.20.1-2.1.jar
         https://mediafilez.forgecdn.net/files/4811/98/Butchersdelight+beta+1.20.1+2.0.8f.jar
+        https://edge.forgecdn.net/files/4397/900/WDA-NoFlyingStructures-1.18.2-1.19.2.zip
     */
     private Uri[] TryGeneratingDownloadUri(ModFile data)
     {
@@ -103,7 +104,16 @@ public class CurseForgeClient
             )
         );
 
+        var edge = idPrefixTransforms.SelectMany(idPrefixTransform =>
+            idSuffixTransforms.SelectMany(idSuffixTransform =>
+                fileNameTransforms.Select(fileNameTransform =>
+                    $"https://edge.forgecdn.net/files/{idPrefixTransform}/{idSuffixTransform}/{fileNameTransform}"
+                )
+            )
+        );
+
         string[] variants = [
+            ..edge,
             ..mediafilez
         ];
 
