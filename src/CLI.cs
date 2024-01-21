@@ -27,11 +27,12 @@ public static class CLI
             throw new ArgumentException("Modpack archive file not found.");
         }
 
-        var files = matches.Files.Select(x => x.Path).ToArray();
+        var files = matches.Files.Select(x => x.Path).ToList();
+        files.Sort();
 
         AnsiConsole.MarkupLineInterpolated($"Directory: {Directory.GetCurrentDirectory()}, Pattern: {result.modpackPath}, Files found: {Markup.Escape(string.Join(", ", files))}");
 
-        return (files, result.outputPath);
+        return (files.ToArray(), result.outputPath);
     }
 
     public static string PrintModpackInfo(Manifest manifest, int requiredFilesCount, int overrideEntriesCount)
