@@ -20,8 +20,6 @@ public static class CLI
         matcher.AddInclude(result.modpackPath);
 
         var matches = matcher.Execute(new DirectoryInfoWrapper(directory));
-
-
         if (!matches.HasMatches)
         {
             throw new ArgumentException("Modpack archive file not found.");

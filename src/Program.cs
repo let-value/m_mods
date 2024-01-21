@@ -74,6 +74,12 @@ foreach (var entry in overrideEntries)
     var filePath = Path.Combine(outputPath, relativePath);
     var fileName = Path.GetFileName(filePath);
 
+    if (fileName is null or "")
+    {
+        AnsiConsole.MarkupLineInterpolated($"Failed to get file name for {Markup.Escape(entry.FullName)}");
+        continue;
+    }
+
     FileType? fileType = relativePath switch
     {
         var x when x.StartsWith("mods") => FileType.Mod,
@@ -92,7 +98,7 @@ foreach (var entry in overrideEntries)
     }
 
     var directoryPath = Path.GetDirectoryName(filePath);
-    if (directoryPath is null)
+    if (directoryPath is null or "")
     {
         AnsiConsole.MarkupLineInterpolated($"Failed to get directory path for {Markup.Escape(relativePath)}");
         continue;
@@ -104,6 +110,8 @@ foreach (var entry in overrideEntries)
     }
 
     entry.ExtractToFile(filePath, true);
+
+    AnsiConsole.MarkupLineInterpolated($"[green]Extracted[/] {Markup.Escape(entry.FullName)}");
 }
 
 if (files.Sum(x => x.Value.Count) < requiredFiles.Count)
