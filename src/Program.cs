@@ -121,7 +121,7 @@ if (files.Sum(x => x.Value.Count) < requiredFiles.Count)
 
 var modList = files.Select(x =>
 {
-    var list = x.Value.Select(y => $"- {y}").ToList();
+    var list = x.Value.Select(y => $"- {y.Key}").ToList();
     list.Sort();
     return $@"
 ### {x.Key} ({list.Count})
