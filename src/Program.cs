@@ -8,6 +8,7 @@ using static mmods.Utils;
 using static mmods.Download;
 using static CurseForge.CurseForgeModpack;
 using mmods;
+using System.Runtime.CompilerServices;
 
 AppDomain.CurrentDomain.UnhandledException += (_, args) =>
 {
@@ -19,13 +20,14 @@ var (modpackPath, outputPath) = ParseArgs(args);
 
 EnsureDirectoryExists(outputPath);
 
-var (manifest, archive) = ReadManifest(modpackPath);
+using var archive = ZipFile.OpenRead(modpackPath);
+var manifest = ReadManifest(archive);
 var (requiredFiles, overrideEntries) = GetManifestFiles(manifest, archive);
 var modLoaders = PrintModpackInfo(manifest, requiredFiles.Count, overrideEntries.Count);
 
 var filesQueue = new ConcurrentQueue<(int, ModFileDescription)>(requiredFiles.Select(file => (3, file)));
 
-var files = new ConcurrentDictionary<FileType, ConcurrentBag<string>>();
+var files = new ConcurrentDictionary<FileType, ConcurrentDictionary<string, bool>>();
 
 async ValueTask ProcessMod((int, ModFileDescription) job, ProgressContext context, CancellationToken cancellationToken)
 {
@@ -33,9 +35,9 @@ async ValueTask ProcessMod((int, ModFileDescription) job, ProgressContext contex
     {
         var (fileType, fileName) = await DownloadMod(job, outputPath, context, cancellationToken);
 
-        files.AddOrUpdate(fileType, new ConcurrentBag<string> { fileName }, (_, bag) =>
+        files.AddOrUpdate(fileType, new ConcurrentDictionary<string, bool> { [fileName] = true }, (_, bag) =>
         {
-            bag.Add(fileName);
+            bag.AddOrUpdate(fileName, true, (_, _) => true);
             return bag;
         });
     }
@@ -69,6 +71,7 @@ foreach (var entry in overrideEntries)
 {
     var relativePath = entry.FullName.Replace($"{manifest.Overrides}/", "");
     var filePath = Path.Combine(outputPath, relativePath);
+    var fileName = Path.GetFileName(filePath);
 
     FileType? fileType = relativePath switch
     {
@@ -80,11 +83,11 @@ foreach (var entry in overrideEntries)
 
     if (fileType is not null)
     {
-        files.AddOrUpdate(FileType.Mod, new ConcurrentBag<string> { Path.GetFileName(filePath) }, (_, bag) =>
-                {
-                    bag.Add(Path.GetFileName(filePath));
-                    return bag;
-                });
+        files.AddOrUpdate((FileType)fileType, new ConcurrentDictionary<string, bool> { [fileName] = true }, (_, bag) =>
+        {
+            bag.AddOrUpdate(fileName, true, (_, _) => true);
+            return bag;
+        });
     }
 
     var directoryPath = Path.GetDirectoryName(filePath);
@@ -101,8 +104,6 @@ foreach (var entry in overrideEntries)
 
     entry.ExtractToFile(filePath, true);
 }
-
-archive.Dispose();
 
 if (files.Sum(x => x.Value.Count) < requiredFiles.Count)
 {
@@ -135,6 +136,8 @@ var description = $@"
 - Mod loaders: {modLoaders}
 
 ## Files
+
+{string.Join(Environment.NewLine, files.Select(x => $"- {x.Key}: {x.Value.Count}"))}
 
 {string.Join(Environment.NewLine, modList)}
 

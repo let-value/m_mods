@@ -11,9 +11,8 @@ namespace CurseForge;
 
 public static class CurseForgeModpack
 {
-    public static (Manifest, ZipArchive) ReadManifest(string modpackPath)
+    public static Manifest ReadManifest(ZipArchive archive)
     {
-        var archive = ZipFile.OpenRead(modpackPath);
         var manifestEntry = archive.Entries.First(x => x.FullName == "manifest.json");
         using var manifestStream = manifestEntry.Open();
         var manifest = JsonSerializer.Deserialize<Manifest>(manifestStream);
@@ -23,7 +22,7 @@ public static class CurseForgeModpack
             throw new Exception("Not a curseforge modpack.");
         }
 
-        return (manifest, archive);
+        return manifest;
     }
 
     public static (IReadOnlyList<ModFileDescription>, IReadOnlyList<ZipArchiveEntry>) GetManifestFiles(Manifest manifest, ZipArchive archive)

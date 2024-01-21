@@ -26,7 +26,7 @@ jobs:
       - name: Download mods
         run: dotnet run --project src/m_mods.csproj -- ${{ matrix.file }} out
       - name: Archive mods
-        run: zip -9 -r mods.zip ./out
+        run: cd out && zip -9 -r ../mods.zip ./*
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "${{ matrix.file }},mods.zip"
