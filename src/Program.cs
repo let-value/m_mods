@@ -1,14 +1,13 @@
 ﻿using System.Collections.Concurrent;
-using System.IO.Compression;
 using ComposableAsync;
 using CurseForge;
 using Spectre.Console;
+using mmods;
 using static mmods.CLI;
 using static mmods.Utils;
 using static mmods.Download;
 using static CurseForge.CurseForgeModpack;
-using mmods;
-using System.Runtime.CompilerServices;
+using System.IO.Compression;
 
 AppDomain.CurrentDomain.UnhandledException += (_, args) =>
 {
@@ -16,11 +15,13 @@ AppDomain.CurrentDomain.UnhandledException += (_, args) =>
     Environment.Exit(1);
 };
 
-var (modpackPath, outputPath) = ParseArgs(args);
+var (matchingFiles, outputPath) = ParseArgs(args);
 
 EnsureDirectoryExists(outputPath);
 
-using var archive = ZipFile.OpenRead(modpackPath);
+using var stream = GetStream(matchingFiles);
+using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+
 var manifest = ReadManifest(archive);
 var (requiredFiles, overrideEntries) = GetManifestFiles(manifest, archive);
 var modLoaders = PrintModpackInfo(manifest, requiredFiles.Count, overrideEntries.Count);

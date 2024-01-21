@@ -1,11 +1,14 @@
 using CurseForge;
+using DotNet.Globbing;
+using Microsoft.Extensions.FileSystemGlobbing;
+using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
 using Spectre.Console;
 
 namespace mmods;
 
 public static class CLI
 {
-    public static (string modpackPath, string outputPath) ParseArgs(string[] args)
+    public static (string[] files, string outputPath) ParseArgs(string[] args)
     {
         var result = args switch
         {
@@ -13,12 +16,23 @@ public static class CLI
             _ => throw new ArgumentException("Expected 2 arguments: modpackPath outputPath")
         };
 
-        if (!File.Exists(result.modpackPath))
+        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+        var matcher = new Matcher();
+        matcher.AddInclude(result.modpackPath);
+
+        var matches = matcher.Execute(new DirectoryInfoWrapper(directory));
+
+
+        if (!matches.HasMatches)
         {
             throw new ArgumentException("Modpack archive file not found.");
         }
 
-        return result;
+        var files = matches.Files.Select(x => x.Path).ToArray();
+
+        AnsiConsole.MarkupLineInterpolated($"Directory: {Directory.GetCurrentDirectory()}, Pattern: {result.modpackPath}, Files found: {Markup.Escape(string.Join(", ", files))}");
+
+        return (files, result.outputPath);
     }
 
     public static string PrintModpackInfo(Manifest manifest, int requiredFilesCount, int overrideEntriesCount)
@@ -45,5 +59,13 @@ public static class CLI
         AnsiConsole.Write(panel);
 
         return modLoaders;
+    }
+
+    public static CombinationStream.CombinationStream GetStream(string[] files)
+    {
+        var resolvedFiles = files.Select(x => Path.Combine(Directory.GetCurrentDirectory(), x));
+        var streams = resolvedFiles.Select(x => new FileStream(x, FileMode.Open) as Stream).ToList();
+
+        return new CombinationStream.CombinationStream(streams);
     }
 }
