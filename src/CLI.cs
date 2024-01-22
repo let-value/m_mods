@@ -1,23 +1,28 @@
-using CurseForge;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
+using mmods.Models;
 using Spectre.Console;
 
 namespace mmods;
 
 public static class CLI
 {
-    public static (string[] files, string outputPath) ParseArgs(string[] args)
+    public static (string modpackGlob, string outputPath) ParseArgs(string[] args)
     {
-        var result = args switch
+        var (modpackGlob, outputPath) = args switch
         {
-        [var modpackPath, var outputPath] => (modpackPath, outputPath),
-            _ => throw new ArgumentException("Expected 2 arguments: modpackPath outputPath")
+        [var a, var b] => (a, b),
+            _ => throw new ArgumentException("Expected 2 arguments: modpackGlob outputPath")
         };
 
+        return (modpackGlob, outputPath);
+    }
+
+    public static string[] MatchFiles(string modpackGlob)
+    {
         var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
         var matcher = new Matcher();
-        matcher.AddInclude(result.modpackPath);
+        matcher.AddInclude(modpackGlob);
 
         var matches = matcher.Execute(new DirectoryInfoWrapper(directory));
         if (!matches.HasMatches)
@@ -28,35 +33,7 @@ public static class CLI
         var files = matches.Files.Select(x => x.Path).ToList();
         files.Sort();
 
-        AnsiConsole.MarkupLineInterpolated($"Directory: {Directory.GetCurrentDirectory()}, Pattern: {result.modpackPath}, Files found: {Markup.Escape(string.Join(", ", files))}");
-
-        return (files.ToArray(), result.outputPath);
-    }
-
-    public static string PrintModpackInfo(Manifest manifest, int requiredFilesCount, int overrideEntriesCount)
-    {
-        var grid = new Grid();
-        grid.AddColumn();
-        grid.AddColumn();
-
-        grid.AddRow(["Name", Markup.Escape(manifest.Name)]);
-        grid.AddRow(["Version", Markup.Escape(manifest.Version)]);
-        grid.AddRow(["Minecraft", Markup.Escape(manifest.Minecraft.Version)]);
-
-        var modLoaders = string.Join(", ", manifest.Minecraft.ModLoaders.Select(x => $"{(x.Primary ? ":check_mark:" : "")} {x.Id}"));
-
-        grid.AddRow(["Mod loaders", Markup.Escape(modLoaders)]);
-        grid.AddRow(["Mods", Markup.Escape(requiredFilesCount.ToString())]);
-        grid.AddRow(["Overrides", Markup.Escape(overrideEntriesCount.ToString())]);
-
-        var panel = new Panel(grid)
-        {
-            Header = new PanelHeader("Modpack"),
-        };
-
-        AnsiConsole.Write(panel);
-
-        return modLoaders;
+        return files.ToArray();
     }
 
     public static CombinationStream.CombinationStream GetStream(string[] files)
@@ -65,5 +42,39 @@ public static class CLI
         var streams = resolvedFiles.Select(x => new FileStream(x, FileMode.Open) as Stream).ToList();
 
         return new CombinationStream.CombinationStream(streams);
+    }
+
+    public static void PrintModpackInfo(Modpack manifest, int filesCount, int overridesCount)
+    {
+        var grid = new Grid();
+        grid.AddColumn();
+        grid.AddColumn();
+
+        var dependencies = (manifest.Dependencies ?? Array.Empty<string>())
+            .ToArray()
+            .Select<string, string[]>(x => ["", Markup.Escape(x)])
+            .ToArray();
+
+        string[][] rows = [
+            ["Name", Markup.Escape(manifest.Name)],
+            manifest.Author is not null or "" ? ["Author", Markup.Escape(manifest.Author)] : [],
+            manifest.Description is not null or "" ? ["Description", Markup.Escape(manifest.Description)] : [],
+            manifest.Version is not null or "" ? ["Version", Markup.Escape(manifest.Version)] : [],
+            ..dependencies,
+            ["Files", Markup.Escape(filesCount.ToString())],
+            ["Overrides", Markup.Escape(overridesCount.ToString())],
+        ];
+
+        foreach (var row in rows)
+        {
+            grid.AddRow(row);
+        }
+
+        var panel = new Panel(grid)
+        {
+            Header = new PanelHeader("Modpack"),
+        };
+
+        AnsiConsole.Write(panel);
     }
 }

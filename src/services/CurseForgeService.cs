@@ -1,36 +1,201 @@
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using mmods;
+using mmods.Models;
+using mmods.Services;
 using Spectre.Console;
 using static mmods.Configuration;
 using static mmods.Utils;
 
 namespace CurseForge;
 
-public static class CurseForgeModpack
+public record CurseForgeModpack(
+    string Name,
+    string? Author,
+    string? Version,
+    string? Description,
+    string[]? Dependencies,
+    ZipArchive Archive,
+    Manifest Manifest
+) : Modpack(Name, Author, Version, Description, Dependencies)
 {
-    public static Manifest ReadManifest(ZipArchive archive)
+    public new void Dispose()
     {
+        base.Dispose();
+        Archive.Dispose();
+    }
+}
+
+public record CurseForgeModpackFile(
+    string Name,
+    ModFileDescription Description
+) : ModpackFile(Name);
+
+public class CurseForgeService : IService
+{
+    CurseForgeClient Client = new();
+
+    async Task<Modpack> IService.GetModpack(Stream stream) => await GetModpack(stream);
+    async private Task<CurseForgeModpack> GetModpack(Stream stream)
+    {
+        var archive = new ZipArchive(stream, ZipArchiveMode.Read);
         var manifestEntry = archive.Entries.First(x => x.FullName == "manifest.json");
         using var manifestStream = manifestEntry.Open();
-        var manifest = JsonSerializer.Deserialize<Manifest>(manifestStream);
+        var manifest = await JsonSerializer.DeserializeAsync<Manifest>(manifestStream);
 
         if (manifest is null || manifest.ManifestType != "minecraftModpack")
         {
             throw new Exception("Not a curseforge modpack.");
         }
 
-        return manifest;
+        return new CurseForgeModpack(
+            manifest.Name,
+            manifest.Author,
+            manifest.Version,
+            null,
+            [
+                $"minecraft {manifest.Minecraft.Version}",
+                ..manifest.Minecraft.ModLoaders.Select(x => x.Id)
+            ],
+            archive,
+            manifest
+        );
     }
 
-    public static (IReadOnlyList<ModFileDescription>, IReadOnlyList<ZipArchiveEntry>) GetManifestFiles(Manifest manifest, ZipArchive archive)
-    {
-        var requiredFiles = manifest.Files.Where(x => x.Required).ToList();
-        var overrideEntries = archive.Entries.Where(x => x.FullName.StartsWith(manifest.Overrides)).ToList();
+    private ZipArchiveEntry[] GetOverrides(CurseForgeModpack modpack) => modpack.Archive.Entries
+            .Where(x => x.FullName.StartsWith(modpack.Manifest.Overrides))
+            .ToArray();
 
-        return (requiredFiles, overrideEntries);
+    async Task<(ModpackFile[] files, int overridesCount)> IService.GetFiles(Modpack modpack) => await GetFiles((CurseForgeModpack)modpack);
+    async private Task<(CurseForgeModpackFile[] files, int overridesCount)> GetFiles(CurseForgeModpack modpack)
+    {
+        var manifest = modpack.Manifest;
+
+        var files = manifest.Files
+            .Where(x => x.Required)
+            .Select(x => new CurseForgeModpackFile($"ProjectID:{x.ProjectID}, FileID:{x.FileID}", x))
+            .ToArray();
+
+        var overridesCount = GetOverrides(modpack).Count();
+
+        return (files, overridesCount);
+    }
+
+    async Task<Dictionary<FileType, HashSet<string>>> IService.ApplyOverrides(Modpack modpack, string outputPath) => await ApplyOverrides((CurseForgeModpack)modpack, outputPath);
+    async private Task<Dictionary<FileType, HashSet<string>>> ApplyOverrides(CurseForgeModpack modpack, string outputPath)
+    {
+        var manifest = modpack.Manifest;
+        var overrides = GetOverrides(modpack);
+        var summary = new Dictionary<FileType, HashSet<string>>();
+
+        foreach (var entry in overrides)
+        {
+            var relativePath = entry.FullName.Replace($"{manifest.Overrides}/", "");
+            var filePath = Path.Combine(outputPath, relativePath);
+            var fileName = Path.GetFileName(filePath);
+
+            if (fileName is null or "")
+            {
+                AnsiConsole.MarkupLineInterpolated($"Failed to get file name for {Markup.Escape(entry.FullName)}");
+                continue;
+            }
+
+            var fileType = relativePath switch
+            {
+                var x when x.StartsWith("mods") => FileType.Mod,
+                var x when x.StartsWith("resourcepacks") => FileType.ResourcePack,
+                var x when x.StartsWith("shaderpacks") => FileType.ShaderPack,
+                _ => FileType.Unknown
+            };
+
+            if (fileType is not FileType.Unknown)
+            {
+                var set = summary.GetValueOrDefault(fileType!, new());
+                set.Add(fileName);
+
+                summary[fileType] = set;
+            }
+
+            var directoryPath = Path.GetDirectoryName(filePath);
+            if (directoryPath is null or "")
+            {
+                AnsiConsole.MarkupLineInterpolated($"Failed to get directory path for {Markup.Escape(relativePath)}");
+                continue;
+            }
+
+            EnsureDirectoryExists(directoryPath);
+
+            entry.ExtractToFile(filePath, true);
+
+            AnsiConsole.MarkupLineInterpolated($"[green]Extracted[/] {Markup.Escape(entry.FullName)}");
+        }
+
+        return summary;
+    }
+
+    async Task<FileType> IService.GetFileType(ModpackFile file) => await GetFileType((CurseForgeModpackFile)file);
+    public async Task<FileType> GetFileType(CurseForgeModpackFile file)
+    {
+        try
+        {
+            var mod = await Client.GetMod(file.Description);
+
+            return mod.ClassId switch
+            {
+                12 or 4559 or 4546 => FileType.ResourcePack,
+                6552 => FileType.ShaderPack,
+                6 => FileType.Mod,
+                _ => throw new Exception($"I dont know what this is. ClassId:{mod.ClassId}")
+            };
+        }
+        catch (Exception exception)
+        {
+            AnsiConsole.WriteException(exception);
+            AnsiConsole.MarkupLineInterpolated($"[red]{file.Name}. Couldn't figure out what this is. Let's assume that this is a mod.[/]");
+
+            return FileType.Mod;
+        }
+    }
+
+    async Task<Uri[]> IService.GetDownloadUris(ModpackFile file) => await GetDownloadUris((CurseForgeModpackFile)file);
+    public async Task<Uri[]> GetDownloadUris(CurseForgeModpackFile file)
+    {
+        try
+        {
+            var downloadUrl = await Client.GetModFileDownloadUrl(file.Description);
+            var parsed = Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri);
+            if (!parsed || uri is null)
+            {
+                throw new Exception("Failed to parse download url");
+            }
+
+            return [uri];
+        }
+        catch (Exception exception)
+        {
+            AnsiConsole.WriteException(exception);
+            AnsiConsole.MarkupLineInterpolated($"[red]{file.Name}. Retrying with fallback.[/]");
+        }
+
+        try
+        {
+            var modFile = await Client.GetModFile(file.Description);
+            var parsed = Uri.TryCreate(modFile.DownloadUrl, UriKind.Absolute, out var uri);
+            if (parsed && uri is not null)
+            {
+                return [uri];
+            }
+
+            AnsiConsole.MarkupLineInterpolated($"[red]{file.Name}. {Markup.Escape(modFile.DisplayName)} has no download url. Trying to generate one.[/]");
+
+            return Client.TryGeneratingDownloadUri(modFile);
+        }
+        catch (Exception exception)
+        {
+            throw new Exception($"{file.Name}. There is nothing we can do. Bail out.", exception);
+        }
     }
 }
 
@@ -78,66 +243,6 @@ public class CurseForgeClient
         return response.Data;
     }
 
-    public async Task<FileType> GetFileType(ModFileDescription file)
-    {
-        try
-        {
-            var mod = await GetMod(file);
-
-            return mod.ClassId switch
-            {
-                12 or 4559 or 4546 => FileType.ResourcePack,
-                6552 => FileType.ShaderPack,
-                6 => FileType.Mod,
-                _ => throw new Exception($"I dont know what this is. ClassId: {mod.ClassId}")
-            };
-        }
-        catch (Exception exception)
-        {
-            AnsiConsole.WriteException(exception);
-            AnsiConsole.MarkupLineInterpolated($"[red]ProjectID: {file.ProjectID} FileID:{file.FileID}. Couldn't figure out what this is. Let's assume that this is a mod. [/]");
-
-            return FileType.Mod;
-        }
-    }
-
-    public async Task<Uri[]> GetDownloadUris(ModFileDescription file)
-    {
-        try
-        {
-            var downloadUrl = await GetModFileDownloadUrl(file);
-            var parsed = Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri);
-            if (!parsed || uri is null)
-            {
-                throw new Exception("Failed to parse download url");
-            }
-
-            return [uri];
-        }
-        catch (Exception exception)
-        {
-            AnsiConsole.MarkupLineInterpolated($"[red]ProjectID: {file.ProjectID} FileID:{file.FileID}. Retrying with fallback. \n{exception.Message}[/]");
-        }
-
-        try
-        {
-            var modFile = await GetModFile(file);
-            var parsed = Uri.TryCreate(modFile.DownloadUrl, UriKind.Absolute, out var uri);
-            if (parsed && uri is not null)
-            {
-                return [uri];
-            }
-
-            AnsiConsole.MarkupLineInterpolated($"[red]ProjectID: {file.ProjectID} FileID:{file.FileID}. {Markup.Escape(modFile.DisplayName)} has no download url. Trying to generate one.[/]");
-
-            return TryGeneratingDownloadUri(modFile);
-        }
-        catch (Exception exception)
-        {
-            throw new Exception($"ProjectID: {file.ProjectID} FileID:{file.FileID}. There is nothing we can do. Bail out.", exception);
-        }
-    }
-
     /*
         Examples:
         https://mediafilez.forgecdn.net/files/4593/548/jei-1.18.2-forge-10.2.1.1005.jar
@@ -147,7 +252,7 @@ public class CurseForgeClient
         https://mediafilez.forgecdn.net/files/4811/98/Butchersdelight+beta+1.20.1+2.0.8f.jar
         https://edge.forgecdn.net/files/4397/900/WDA-NoFlyingStructures-1.18.2-1.19.2.zip
     */
-    private Uri[] TryGeneratingDownloadUri(ModFile data)
+    public Uri[] TryGeneratingDownloadUri(ModFile data)
     {
         var id = data.Id.ToString();
 

@@ -1,13 +1,10 @@
-﻿using System.Collections.Concurrent;
-using ComposableAsync;
-using CurseForge;
+﻿using CurseForge;
 using Spectre.Console;
 using mmods;
 using static mmods.CLI;
 using static mmods.Utils;
-using static mmods.Download;
-using static CurseForge.CurseForgeModpack;
-using System.IO.Compression;
+using static mmods.Report;
+using mmods.Services;
 
 AppDomain.CurrentDomain.UnhandledException += (_, args) =>
 {
@@ -15,48 +12,23 @@ AppDomain.CurrentDomain.UnhandledException += (_, args) =>
     Environment.Exit(1);
 };
 
-var (matchingFiles, outputPath) = ParseArgs(args);
+var (modpackGlob, outputPath) = ParseArgs(args);
+var modpackFiles = MatchFiles(modpackGlob);
 
 EnsureDirectoryExists(outputPath);
 
-using var stream = GetStream(matchingFiles);
-using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+using var stream = GetStream(modpackFiles);
 
-var manifest = ReadManifest(archive);
-var (requiredFiles, overrideEntries) = GetManifestFiles(manifest, archive);
-var modLoaders = PrintModpackInfo(manifest, requiredFiles.Count, overrideEntries.Count);
+IService service = new CurseForgeService();
 
-var filesQueue = new ConcurrentQueue<(int, ModFileDescription)>(requiredFiles.Select(file => (3, file)));
+using var modpack = await service.GetModpack(stream);
+var (files, overridesCount) = await service.GetFiles(modpack);
 
-var files = new ConcurrentDictionary<FileType, ConcurrentDictionary<string, bool>>();
+PrintModpackInfo(modpack, files.Length, overridesCount);
 
-async ValueTask ProcessMod((int, ModFileDescription) job, ProgressContext context, CancellationToken cancellationToken)
-{
-    try
-    {
-        var (fileType, fileName) = await DownloadMod(job, outputPath, context, cancellationToken);
+var downloader = new Downloader(files, service, outputPath);
 
-        files.AddOrUpdate(fileType, new ConcurrentDictionary<string, bool> { [fileName] = true }, (_, bag) =>
-        {
-            bag.AddOrUpdate(fileName, true, (_, _) => true);
-            return bag;
-        });
-    }
-    catch
-    {
-        var (tries, file) = job;
-        if (tries > 0)
-            filesQueue.Enqueue((tries - 1, file));
-    }
-}
-
-Task DownloadMods(ProgressContext context) => Parallel.ForEachAsync(
-    filesQueue,
-    new ParallelOptions { MaxDegreeOfParallelism = 4 },
-    (job, cancellationToken) => ProcessMod(job, context, cancellationToken)
-);
-
-await AnsiConsole.Progress()
+var downloadSummary = await AnsiConsole.Progress()
     .AutoClear(true)
     .HideCompleted(true)
     .Columns([
@@ -66,91 +38,15 @@ await AnsiConsole.Progress()
         new RemainingTimeColumn(),
         new SpinnerColumn(),
     ])
-    .StartAsync(DownloadMods);
+    .StartAsync(downloader.DownloadMods);
 
-foreach (var entry in overrideEntries)
+var downloadedCount = downloadSummary.Sum(x => x.Value.Count);
+if (downloadedCount < files.Length)
 {
-    var relativePath = entry.FullName.Replace($"{manifest.Overrides}/", "");
-    var filePath = Path.Combine(outputPath, relativePath);
-    var fileName = Path.GetFileName(filePath);
-
-    if (fileName is null or "")
-    {
-        AnsiConsole.MarkupLineInterpolated($"Failed to get file name for {Markup.Escape(entry.FullName)}");
-        continue;
-    }
-
-    FileType? fileType = relativePath switch
-    {
-        var x when x.StartsWith("mods") => FileType.Mod,
-        var x when x.StartsWith("resourcepacks") => FileType.ResourcePack,
-        var x when x.StartsWith("shaderpacks") => FileType.ShaderPack,
-        _ => null
-    };
-
-    if (fileType is not null)
-    {
-        files.AddOrUpdate((FileType)fileType, new ConcurrentDictionary<string, bool> { [fileName] = true }, (_, bag) =>
-        {
-            bag.AddOrUpdate(fileName, true, (_, _) => true);
-            return bag;
-        });
-    }
-
-    var directoryPath = Path.GetDirectoryName(filePath);
-    if (directoryPath is null or "")
-    {
-        AnsiConsole.MarkupLineInterpolated($"Failed to get directory path for {Markup.Escape(relativePath)}");
-        continue;
-    }
-
-    if (!Directory.Exists(directoryPath))
-    {
-        Directory.CreateDirectory(directoryPath);
-    }
-
-    entry.ExtractToFile(filePath, true);
-
-    AnsiConsole.MarkupLineInterpolated($"[green]Extracted[/] {Markup.Escape(entry.FullName)}");
+    throw new Exception($"[red]Failed to download all required files.[/] Downloaded {downloadedCount}/{files.Length}");
 }
 
-if (files.Sum(x => x.Value.Count) < requiredFiles.Count)
-{
-    throw new Exception($"[red]Failed to download all required files.[/] Downloaded {files.Count}/{requiredFiles.Count}");
-}
+var overridesSummary = await service.ApplyOverrides(modpack, outputPath);
 
-var modList = files.Select(x =>
-{
-    var list = x.Value.Select(y => $"- {y.Key}").ToList();
-    list.Sort();
-    return $@"
-### {x.Key} ({list.Count})
-
-<details>
-<summary>Show list</summary>
-
-{string.Join(Environment.NewLine, list)}
-
-</details>
-
-";
-});
-
-var description = $@"
-# Modpack
-
-- Name: {manifest.Name},
-- Version: {manifest.Version}
-- Minecraft version: {manifest.Minecraft.Version}
-- Mod loaders: {modLoaders}
-
-## Files
-
-{string.Join(Environment.NewLine, files.Select(x => $"- {x.Key}: {x.Value.Count}"))}
-
-{string.Join(Environment.NewLine, modList)}
-
-";
-
-var readmePath = Path.Combine(outputPath, "README.md");
-await File.WriteAllTextAsync(readmePath, description);
+var report = GetReport(modpack, downloadSummary, overridesSummary);
+await File.WriteAllTextAsync(Path.Combine(outputPath, "README.md"), report);

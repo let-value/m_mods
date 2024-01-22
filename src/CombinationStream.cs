@@ -39,11 +39,15 @@ namespace CombinationStream
         private long _postion;
 
         public CombinationStream(IList<Stream> streams)
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
             : this(streams, null)
+#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
         {
         }
 
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
         public CombinationStream(IList<Stream> streams, IList<int> streamsToDispose)
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
         {
             if (streams == null)
                 throw new ArgumentNullException("streams");
@@ -134,14 +138,18 @@ namespace CombinationStream
         }
 
 #else
+#pragma warning disable CS8765 // Nullability of type of parameter doesn't match overridden member (possibly because of nullability attributes).
         public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback callback, object state)
+#pragma warning restore CS8765 // Nullability of type of parameter doesn't match overridden member (possibly because of nullability attributes).
         {
             CombinationStreamAsyncResult asyncResult = new CombinationStreamAsyncResult(state);
             if (count > 0)
             {
                 int buffPostion = offset;
 
+#pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type.
                 AsyncCallback rc = null;
+#pragma warning restore CS8600 // Converting null literal or possible null value to non-nullable type.
                 rc = readresult =>
                          {
                              try
@@ -216,7 +224,9 @@ namespace CombinationStream
             return ar.BytesRead;
         }
 
+#pragma warning disable CS8765 // Nullability of type of parameter doesn't match overridden member (possibly because of nullability attributes).
         public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback callback, object state)
+#pragma warning restore CS8765 // Nullability of type of parameter doesn't match overridden member (possibly because of nullability attributes).
         {
             throw new InvalidOperationException("Stream is not writable");
         }
@@ -225,7 +235,9 @@ namespace CombinationStream
         {
             private readonly object _asyncState;
 
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
             public CombinationStreamAsyncResult(object asyncState)
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
             {
                 _asyncState = asyncState;
                 _manualResetEvent = new ManualResetEvent(false);
