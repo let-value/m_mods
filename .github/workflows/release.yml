@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['Prominence II [RPG]-v2.6.5.*']
+        file: ['Prominence_II_[RPG]-v2.6.5.*']
     runs-on: ubuntu-latest
     permissions:
       contents: write
