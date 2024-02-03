@@ -22,10 +22,10 @@ jobs:
         with:
           dotnet-version: 8
       - name: Download mods
-        run: dotnet run --project src/m_mods.csproj -- ${{ matrix.file }} out
+        run: dotnet run --project src/m_mods.csproj -- "${{ matrix.file }}" out
       - name: Archive mods
         run: cd out && zip -9 -r ../mods.zip ./*
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "${{ matrix.file }},mods.zip"
+          artifacts: "modpack.zip,mods.zip"
           bodyFile: "out/README.md"
