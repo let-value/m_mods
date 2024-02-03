@@ -50,3 +50,10 @@ var overridesSummary = await service.ApplyOverrides(modpack, outputPath);
 
 var report = GetReport(modpack, downloadSummary, overridesSummary);
 await File.WriteAllTextAsync(Path.Combine(outputPath, "README.md"), report);
+
+stream.Dispose();
+using var stream2 = GetStream(modpackFiles);
+
+using var file = File.Create("modpack.zip");
+stream2.CopyTo(file);
+file.Close();
