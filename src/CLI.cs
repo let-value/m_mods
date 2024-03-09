@@ -7,15 +7,15 @@ namespace mmods;
 
 public static class CLI
 {
-    public static (string modpackGlob, string outputPath) ParseArgs(string[] args)
+    public static (string modpackFormat, string modpackGlob, string outputPath) ParseArgs(string[] args)
     {
-        var (modpackGlob, outputPath) = args switch
+        var (modpackFormat, modpackGlob, outputPath) = args switch
         {
-        [var a, var b] => (a, b),
-            _ => throw new ArgumentException("Expected 2 arguments: modpackGlob outputPath")
+        [var format, var modpack, var output] => (format, modpack, output),
+            _ => throw new ArgumentException("Expected 3 arguments: modpackFormat modpackGlob outputPath")
         };
 
-        return (modpackGlob, outputPath);
+        return (modpackFormat, modpackGlob, outputPath);
     }
 
     public static string[] MatchFiles(string modpackGlob)
@@ -56,6 +56,7 @@ public static class CLI
             .ToArray();
 
         string[][] rows = [
+            ["Format", Markup.Escape(manifest.Format)],
             ["Name", Markup.Escape(manifest.Name)],
             manifest.Author is not null or "" ? ["Author", Markup.Escape(manifest.Author)] : [],
             manifest.Description is not null or "" ? ["Description", Markup.Escape(manifest.Description)] : [],

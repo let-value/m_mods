@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -19,7 +18,7 @@ public record CurseForgeModpack(
     string[]? Dependencies,
     ZipArchive Archive,
     Manifest Manifest
-) : Modpack(Name, Author, Version, Description, Dependencies)
+) : Modpack("CurseForge", Name, Author, Version, Description, Dependencies)
 {
     public new void Dispose()
     {

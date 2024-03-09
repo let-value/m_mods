@@ -12,7 +12,8 @@
       // If you have changed target frameworks, make sure to update the program path.
       "program": "${workspaceFolder}/src/bin/Debug/net8.0/m_mods.dll",
       "args": [
-        "Prominence+II+[FABRIC]-v2.5.6.*",
+        "modrinth",
+        "examples/modrinth_optifine.*",
         "out"
       ],
       "cwd": "${workspaceFolder}",

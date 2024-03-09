@@ -1,4 +1,5 @@
 ﻿using CurseForge;
+using Modrinth;
 using Spectre.Console;
 using mmods;
 using static mmods.CLI;
@@ -12,14 +13,19 @@ AppDomain.CurrentDomain.UnhandledException += (_, args) =>
     Environment.Exit(1);
 };
 
-var (modpackGlob, outputPath) = ParseArgs(args);
+var (modpackFormat, modpackGlob, outputPath) = ParseArgs(args);
 var modpackFiles = MatchFiles(modpackGlob);
 
 EnsureDirectoryExists(outputPath);
 
 using var stream = GetStream(modpackFiles);
 
-IService service = new CurseForgeService();
+IService service = modpackFormat switch
+{
+    "curseforge" => new CurseForgeService(),
+    "modrinth" => new ModrinthService(),
+    _ => throw new ArgumentException("Unsupported modpack format.")
+};
 
 using var modpack = await service.GetModpack(stream);
 var (files, overridesCount) = await service.GetFiles(modpack);

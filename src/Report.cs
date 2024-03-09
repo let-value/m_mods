@@ -46,6 +46,7 @@ public static class Report
         var description = $@"
 # Modpack
 
+- Format: {modpack.Format},
 - Name: {modpack.Name},
 - Description: {modpack.Description}
 - Author: {modpack.Author}
