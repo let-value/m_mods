@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['examples/optifine-1.zip']
+        file: ['Vanilla.zip']
     runs-on: ubuntu-latest
     permissions:
       contents: write
