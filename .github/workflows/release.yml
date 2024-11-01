@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['examples/optifine-1.zip']
+        file: ['winter 1.0.0.mrpack']
     runs-on: ubuntu-latest
     permissions:
       contents: write
