@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['winter 1.0.0.mrpack']
+        file: ['shdr 1.0.0.mrpack']
     runs-on: ubuntu-latest
     permissions:
       contents: write
