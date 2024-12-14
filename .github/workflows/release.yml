@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['journey-1-*']
+        file: ['journey-1-part.*']
     runs-on: ubuntu-latest
     permissions:
       contents: write
