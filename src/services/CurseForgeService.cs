@@ -40,6 +40,9 @@ public class CurseForgeService : IService
     async private Task<CurseForgeModpack> GetModpack(Stream stream)
     {
         var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        
+        Console.WriteLine(String.Join("\n", archive.Entries.Select(x => x.FullName)));
+
         var manifestEntry = archive.Entries.First(x => x.FullName == "manifest.json");
         using var manifestStream = manifestEntry.Open();
         var manifest = await JsonSerializer.DeserializeAsync<Manifest>(manifestStream);

@@ -20,6 +20,8 @@ public static class CLI
 
     public static string[] MatchFiles(string modpackGlob)
     {
+        var cwd = Directory.GetCurrentDirectory();
+        Console.WriteLine($"Searching for modpack archive file: {modpackGlob}, in {cwd}");
         var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
         var matcher = new Matcher();
         matcher.AddInclude(modpackGlob);
@@ -32,6 +34,8 @@ public static class CLI
 
         var files = matches.Files.Select(x => x.Path).ToList();
         files.Sort();
+
+        Console.WriteLine(String.Join("\n", files));
 
         return files.ToArray();
     }
