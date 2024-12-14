@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['winter 1.0.0.mrpack']
+        file: ['journey-1-*']
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,7 +22,7 @@ jobs:
         with:
           dotnet-version: 8
       - name: Download mods
-        run: dotnet run --project src/m_mods.csproj -- modrinth "${{ matrix.file }}" out
+        run: dotnet run --project src/m_mods.csproj -- curseforge "${{ matrix.file }}" out
       - name: Archive mods
         run: cd out && zip -9 -r ../mods.zip ./*
       - uses: ncipollo/release-action@v1
