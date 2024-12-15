@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['journey-1.*']
+        file: ['examples/curseforge_optifine.zip']
     runs-on: ubuntu-latest
     permissions:
       contents: write
