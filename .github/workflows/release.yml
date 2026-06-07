@@ -10,7 +10,7 @@ jobs:
   build:
     strategy:
       matrix: 
-        file: ['examples/curseforge_optifine.zip']
+        file: ['examples/her.zip']
     runs-on: ubuntu-latest
     permissions:
       contents: write
