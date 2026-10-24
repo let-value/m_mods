@@ -8,6 +8,7 @@ on:
 
 jobs:
   build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/opa-') }}
     strategy:
       matrix: 
         file: ['examples/curseforge_optifine.zip']
