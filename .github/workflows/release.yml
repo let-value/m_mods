@@ -4,28 +4,31 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "*"
+      - "opa-1.0"
 
 jobs:
   build:
-    if: ${{ !startsWith(github.ref, 'refs/tags/opa-') }}
-    strategy:
-      matrix: 
-        file: ['examples/curseforge_optifine.zip']
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       CurseForge: ${{ secrets.CURSEFORGE }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v3
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8
       - name: Download mods
-        run: dotnet run --project src/m_mods.csproj -- curseforge "${{ matrix.file }}" out
+        run: dotnet run --project src/m_mods.csproj -- curseforge "packs/Опа-1.0.zip" out
       - name: Archive mods
         run: cd out && zip -9 -r ../mods.zip ./*
+      - name: Validate release assets
+        run: |
+          test -s modpack.zip
+          test -s mods.zip
+          test -s out/README.md
+          unzip -tq modpack.zip
+          unzip -tq mods.zip
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "modpack.zip,mods.zip"
